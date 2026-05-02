@@ -1,4 +1,4 @@
-# Motivation
+# Research Harness
 
 This is one of the few files that is entirely written by a human. I write to shed light on the philosophy / motivation behind constructing this harness. 
 
