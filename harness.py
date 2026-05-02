@@ -515,6 +515,40 @@ def build_score_table(scores_list: list[dict]) -> str:
     return "\n".join([header, sep] + rows)
 
 
+# ── Tools context ─────────────────────────────────────────────────────────────
+
+def build_tools_context() -> str:
+    """
+    Returns a prompt section describing available CLI tools if they are
+    configured. Agents call these via Bash — no special tool-use protocol needed.
+    """
+    sections: list[str] = []
+
+    # Web search via Grok
+    env = parse_config(BASE / ".env")
+    if env.get("XAI_API_KEY"):
+        sections.append(
+            "## Available Tools\n\n"
+            "You have access to a web search tool powered by the xAI Grok API.\n"
+            "Call it via Bash:\n\n"
+            "```bash\n"
+            "python src/tools/web_search.py \"your search query\"\n"
+            "python src/tools/web_search.py \"your query\" --num-results 10\n"
+            "python src/tools/web_search.py \"your query\" --format json\n"
+            "```\n\n"
+            "Use it to:\n"
+            "- Find related academic papers and cite them properly\n"
+            "- Check whether your methodology has established precedents\n"
+            "- Look for public datasets or benchmarks others have used\n"
+            "- Verify empirical claims before making them in the paper\n\n"
+            "Search early in each iteration, not just when stuck."
+        )
+
+    if not sections:
+        return ""
+    return "\n\n".join(sections)
+
+
 # ── Init command ──────────────────────────────────────────────────────────────
 
 def cmd_init() -> None:
@@ -651,6 +685,39 @@ def cmd_init() -> None:
         print()
         print(c(DIM, "  Skipping API setup."))
 
+    # Step 2b: Grok web search (optional)
+    print()
+    print(c(BOLD, "Step 2b of 5: Web Search Tool (optional)"))
+    print(c(DIM, "  Agents can search for research papers using the xAI Grok API."))
+    print(c(DIM, "  Get a key at: console.x.ai"))
+    print()
+    enable_search = ask("Enable Grok web search? [y/n] ").lower()
+
+    if enable_search == "y":
+        xai_key = ask("xAI API key:\n> ").strip()
+        if xai_key:
+            env_path = BASE / ".env"
+            existing = read_file(env_path)
+            if "XAI_API_KEY" not in existing:
+                with open(env_path, "a") as f:
+                    f.write(f'\n# xAI Grok web search\nXAI_API_KEY="{xai_key}"\n')
+            else:
+                # overwrite existing value
+                lines = existing.splitlines()
+                new_lines = []
+                for line in lines:
+                    if line.strip().startswith("XAI_API_KEY"):
+                        new_lines.append(f'XAI_API_KEY="{xai_key}"')
+                    else:
+                        new_lines.append(line)
+                write_file(env_path, "\n".join(new_lines) + "\n")
+            print(c(GREEN, "  XAI_API_KEY saved to .env"))
+            print(c(DIM, "  Agents will use src/tools/web_search.py to search for papers."))
+        else:
+            print(c(YELLOW, "  No key entered — skipping web search."))
+    else:
+        print(c(DIM, "  Skipping web search."))
+
     # Step 3: Taste review
     print()
     print(c(BOLD, "Step 3 of 5: Style Guide (taste.md)"))
@@ -766,9 +833,10 @@ def cmd_run(max_iterations: int | None, model: str | None, resume: bool) -> None
         print(c(BOLD + BLUE, f"  ── Iteration {i} / {max_iters} ──"))
         print()
 
-        brief_text   = read_file(DOCS / "research_brief.md")
-        critiquer_pm = read_file(DOCS / "critique_prompt.md")
+        brief_text    = read_file(DOCS / "research_brief.md")
+        critiquer_pm  = read_file(DOCS / "critique_prompt.md")
         researcher_pm = read_file(DOCS / "researcher_prompt.md")
+        tools_ctx     = build_tools_context()
 
         # ── Phase 1: Critiquer ────────────────────────────────────────────────
         print(c(YELLOW, f"  [Phase 1] Critiquer..."))
@@ -783,12 +851,13 @@ def cmd_run(max_iterations: int | None, model: str | None, resume: bool) -> None
                 f"Do NOT re-raise points already addressed."
             )
 
-        critique_prompt = "\n\n".join([
-            brief_text,
-            critiquer_pm,
-            history_ctx,
-            f"Write your critique to docs/exchanges/critique_latest.md. Use iteration number {i} in your header.",
-        ])
+        critique_parts = [brief_text, critiquer_pm, history_ctx]
+        if tools_ctx:
+            critique_parts.append(tools_ctx)
+        critique_parts.append(
+            f"Write your critique to docs/exchanges/critique_latest.md. Use iteration number {i} in your header."
+        )
+        critique_prompt = "\n\n".join(critique_parts)
 
         critique_system = (
             f"You are the critiquer agent reviewing research on {topic} for {venue}. "
@@ -824,12 +893,11 @@ def cmd_run(max_iterations: int | None, model: str | None, resume: bool) -> None
         # Snapshot findings before
         copy_file(DOCS / "findings.md", ARCHIVE / f"findings_before_{i}.md")
 
-        researcher_parts = [
-            brief_text,
-            researcher_pm,
-        ]
+        researcher_parts = [brief_text, researcher_pm]
         if critique_text:
             researcher_parts.append(critique_text)
+        if tools_ctx:
+            researcher_parts.append(tools_ctx)
 
         if session.get("pending_steering"):
             steering_section = (
@@ -948,8 +1016,6 @@ def cmd_run(max_iterations: int | None, model: str | None, resume: bool) -> None
 
     if not taste_text.strip() or taste_text.strip().startswith("<!--"):
         taste_text = "No style guide provided — use clear, direct prose."
-
-    summary_path = SUMMARIES / f"summary_{run_idx}.md"
 
     summarizer_parts = [
         brief_text,

@@ -6,7 +6,9 @@ After my short stints in several research labs([Ning Lab](https://u.osu.edu/ning
 
 To answer novel, meaningful questions, we connect the serendipity of human intuition with the scalable rigor of the agent. 
 
-I come from no position of credibility standing next to the creators of other research harnesses such as [autoresearch](https://github.com/karpathy/autoresearch). I can only let the results speak for themselves: If this harness boils down to p-hacking, non-robust methodologies, hallucinations etc., then I am wrong. Otherwise, I hope this harness can help more people answer serendipitous questions. 
+I come from no position of credibility standing next to the creators of other research harnesses such as [autoresearch](https://github.com/karpathy/autoresearch). I can only let the results speak for themselves: If this harness boils down to p-hacking, non-robust methodologies, hallucinations etc., then I am wrong. Otherwise, I hope this harness can help more people answer serendipitous questions.
+
+Experiments and updated versions will be documented in branches.
 
 
 

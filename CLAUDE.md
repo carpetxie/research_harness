@@ -140,6 +140,19 @@ Rules:
 4. Runnable as `uv run python -m experiments.<name>.run`
 5. Unit tests use synthetic data only — no network calls
 
+## Web Search Tool (`src/tools/web_search.py`)
+
+If `XAI_API_KEY` is set in `.env`, agents can search for research papers via Bash:
+
+```bash
+python src/tools/web_search.py "CRPS scoring rules prediction markets"
+python src/tools/web_search.py "Granger causality financial time series" --num-results 10
+python src/tools/web_search.py "your query" --format json   # for programmatic use
+```
+
+The key is set during `python harness.py init` (Step 2b) or added manually to `.env`.
+When set, the harness automatically includes tool instructions in both agent prompts.
+
 ## Credentials
 
 Store in `.env` (gitignored). Load with python-dotenv:
