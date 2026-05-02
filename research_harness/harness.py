@@ -241,16 +241,13 @@ def run_agent(
 ) -> int:
     """
     Run a claude -p subprocess, stream stdout to terminal (DIM) and log file.
+    Prompt is passed via stdin to avoid ARG_MAX limits on large prompts.
     Returns the exit code.
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Escape the prompt and system_prompt for shell safety — pass via env vars
-    # to avoid shell quoting issues with long, complex prompts.
-    env = os.environ.copy()
-    env["_HARNESS_PROMPT"] = prompt
-    env["_HARNESS_SYSTEM"] = system_prompt
-
+    # Pass prompt via stdin (no positional arg) to avoid OS argument length limits.
+    # claude -p with no positional prompt reads from stdin.
     cmd = [
         "claude", "-p",
         "--model", model,
@@ -258,22 +255,25 @@ def run_agent(
         "--allowed-tools", allowed_tools,
         "--max-turns", str(max_turns),
         "--no-session-persistence",
-        prompt,
     ]
 
     try:
         proc = subprocess.Popen(
             cmd,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
             cwd=BASE,
-            env=env,
         )
     except FileNotFoundError:
-        print(c(RED, "  ERROR: 'claude' CLI not found. Install it with: npm install -g @anthropic-ai/claude-code"))
+        print(c(RED, "  ERROR: 'claude' CLI not found. Is Claude Code installed?"))
         return 1
+
+    assert proc.stdin is not None
+    proc.stdin.write(prompt)
+    proc.stdin.close()
 
     with open(log_path, "w", encoding="utf-8") as log_f:
         assert proc.stdout is not None
@@ -518,7 +518,7 @@ def build_score_table(scores_list: list[dict]) -> str:
 # ── Init command ──────────────────────────────────────────────────────────────
 
 def cmd_init() -> None:
-    print_banner("Research Harness — Setup Wizard", "Answer each question to configure your project.")
+    print_banner("Research Harness: Quick Setup", "Answer each question to configure your project.")
 
     # Step 1: Interview
     print(c(BOLD, "Step 1 of 5: Research Interview"))
@@ -859,8 +859,8 @@ def cmd_run(max_iterations: int | None, model: str | None, resume: bool) -> None
             prompt=researcher_prompt_text,
             system_prompt=researcher_system,
             model=agent_model,
-            allowed_tools="Read,Write,Edit,Bash,Glob,Grep",
-            max_turns=30,
+            allowed_tools="Read,Write,Edit,Bash,Glob,Grep,NotebookEdit",
+            max_turns=50,
             log_path=researcher_log,
         )
         if rc != 0:
@@ -914,19 +914,24 @@ def cmd_run(max_iterations: int | None, model: str | None, resume: bool) -> None
         render_checkpoint(session, i, cfg)
 
         # ── Interactive prompt ─────────────────────────────────────────────────
-        if i < max_iters:
-            resp = sys.stdin.readline().strip().lower()
-        else:
-            resp = sys.stdin.readline().strip().lower()
+        while True:
+            try:
+                resp = sys.stdin.readline().strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                resp = "q"
 
-        if resp in ("q", "quit"):
-            print(c(YELLOW, "\n  Exiting. Resume with: python harness.py --resume"))
-            sys.exit(0)
-        elif resp in ("s", "steer"):
-            session = handle_steering(session)
-            # After steering, automatically continue (don't prompt again)
-
-        # If last iteration and user pressed Enter, fall through to summarizer
+            if resp in ("q", "quit"):
+                print(c(YELLOW, "\n  Exiting. Resume with: python harness.py --resume"))
+                sys.exit(0)
+            elif resp in ("s", "steer"):
+                session = handle_steering(session)
+                # Re-render prompt after steering
+                if i < max_iters:
+                    print(c(BOLD, "  [Enter] next iteration   [s] steer   [q] quit"))
+                else:
+                    print(c(BOLD, "  [Enter] generate summary   [s] steer   [q] quit"))
+            else:
+                break  # Enter or anything else → continue
 
     # ── Summarizer ────────────────────────────────────────────────────────────
     print()
