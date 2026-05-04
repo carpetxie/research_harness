@@ -249,9 +249,16 @@ class TestStats:
         assert d > 0
 
     def test_p_value_bounds(self):
-        from experiments.pronoun_attribution.analysis import approx_p_from_t
-        p = approx_p_from_t(0.0, 19)
-        assert 0.9 < p <= 1.0  # t=0 → p=1
+        # Test that paired_t_test returns exact p-values via scipy.stats
+        from experiments.pronoun_attribution.analysis import paired_t_test
+        # t=0 → p should be 1.0 (identical lists)
+        x = [2.0, 3.0, 2.5, 3.5, 2.0]
+        t, p = paired_t_test(x, x)
+        assert t == 0.0
+        assert p == 1.0
 
-        p = approx_p_from_t(10.0, 19)
-        assert p < 0.01  # very significant
+        # Large t → very small p
+        you = [4.0, 4.0, 4.0, 4.0, 4.0]
+        they = [1.0, 1.0, 1.0, 1.0, 1.0]
+        t2, p2 = paired_t_test(you, they)
+        assert p2 < 0.0001  # exact p from t(4) is extremely small
