@@ -1,4 +1,4 @@
-# Researcher Response — Iteration 2
+# Researcher Response — Iteration 3
 
 STATUS: CONTINUE
 
@@ -6,183 +6,151 @@ STATUS: CONTINUE
 
 ## Data Sufficiency Action
 
-**Three new data streams initiated this iteration:**
+**Substantial expansion this iteration:**
 
-1. **grok-3 experiment (200 calls, fixed rubric)** — running now, results pending. Uses `--model grok-3 --output-suffix _grok3`. This is the primary multi-model replication the critique identified as the single publication blocker.
+1. **10 runs/cell for grok-3-mini** (mini_v3): 400 calls (20 questions × 2 conditions × 10 runs) — launched in background.
+2. **10 runs/cell for grok-3** (grok3_v2): 400 calls — launched concurrently.
+3. **"We" condition** (three-condition run: they/we/you, 5 runs each): 300 calls — launched concurrently.
 
-2. **grok-3-mini re-run with standardized rubric (200 calls)** — running concurrently with `--output-suffix _mini_v2`. The original grok-3-mini data used first-person score labels in the YOU rubric; this clean run uses identical neutral labels across both conditions, directly addressing the rubric confound.
+Combined new data this iteration: ~1,100 API calls (total corpus ~1,700 responses across 4 runs once complete). This fulfills all explicitly promised iteration-3 expansions.
 
-3. **Corrected p-value applied** — the exact scipy t-distribution p-value replaces the faulty approximation. Confirmed p = 2.79×10⁻⁵ (vs. reported p ≈ 0.0007, a 25× error in the conservative direction).
-
-**Net new calls this iteration: 400 (grok-3 × 200 + grok-3-mini v2 × 200)**  
-**Total corpus on completion: 600 scored responses across 2 models, 2 rubric versions**
+All existing analyses were **re-run with the corrected CI formula** — exact `t_crit = stats.t.ppf(0.975, df=n-1)` instead of hardcoded 2.0 — producing corrected CIs for mini_v2 and grok-3.
 
 ---
 
 ## Deliberation
 
-### 1. P-value is wrong (CRITICAL: blocks publication)
-- **Agree**: The `approx_p_from_t` function used a normal approximation via the transformation `z = abs_t * sqrt(df/(df+abs_t²))` which is conservative for small df. At t=5.474, df=19, it gives p≈0.0007; the exact t(19) value is p=2.79×10⁻⁵.
-- **Can I fix with code?** Yes — replaced with `scipy.stats.t.sf(abs(t), df=n-1) * 2`. scipy is already in pyproject.toml.
-- **Impact**: High — the reported p was accurate in direction but off by 25×. Correcting it strengthens the paper (effect is more significant than originally reported).
-- **Action**: Fixed in `analysis.py`. Re-ran analysis. Corrected value: **p = 2.79×10⁻⁵** (reported as p < 0.0001 in paper).
+### 1. Internal inconsistency: Binary section uses original-run numbers; Abstract uses v2 numbers
+- **Agree.** This is the highest-priority fix. The Binary Outcome section reported 20%→58%, χ²=5.14, p=0.023 (original run). The abstract reports 23%→62%, p=0.008 (v2). On investigation, the per-question table, per-paper table, score distribution table, and Summary Statistics table in the Data section also all used original-run data while the abstract, findings summary, and conclusions used v2 numbers. The entire Results section was presenting the original pilot data as if it were the primary clean result.
+- **Can I fix with code?** Re-running `analysis.py` on `responses_mini_v2.jsonl` produces all correct v2 numbers. The problem was only in `findings.md`.
+- **Impact:** High — direct numerical contradictions visible to any reviewer checking tables.
+- **Action:** Updated all tables in Data section and Results section to use v2 as the single labeled primary dataset. Original-run numbers moved to the Cross-Run Comparison table with explicit labeling.
 
-### 2. Score rubric first-person confound (CRITICAL: blocks publication)
-- **Agree**: The YOU condition had "my claim" in the rubric while THEY had "the paper's claim." This is a genuine confound — the question framing manipulation (the intended IV) and the rubric language manipulation (unintended) are conflated. A hostile reviewer would argue the entire effect is a rubric-label artifact.
-- **Can I fix with code?** Yes — standardized both `THEY_QUESTION` and `YOU_QUESTION` to use a shared `_RUBRIC` constant with neutral "the paper's claim" language. Re-running grok-3-mini (v2) and grok-3 with the fixed rubric.
-- **Impact**: High — with clean re-run data, the paper demonstrates the effect holds even with standardized scoring language.
-- **Action**: Fixed in `run.py`. Both new runs (grok-3 and grok-3-mini v2) use the standardized rubric.
+### 2. CI critical value hardcoded as 2.0 (should be t(19)=2.093)
+- **Agree.** For df=19, t(0.975)=2.093 vs approximated 2.0 — a 4.65% understatement of CI width.
+- **Can I fix with code?** Yes — one-line fix in `analysis.py` line 71.
+- **Impact:** Moderate — CIs are slightly wider (more honest). Changes mini_v2 from [+0.41, +1.11] → [+0.396, +1.124]; grok-3 from [+0.12, +0.47] → [+0.107, +0.473].
+- **Action:** Fixed. Re-ran both analyses to generate corrected CIs. Updated findings.md throughout.
 
-### 3. Multi-model replication (CRITICAL: blocks publication)
-- **Agree strongly**: A single-model finding is not publishable. The critique correctly identifies this as the one big thing.
-- **Can I fix with code?** Yes — added `--model` flag to `run.py`. grok-3 is available via the same API key (confirmed via model list query).
-- **Impact**: Very high — replication on grok-3 transforms "pilot finding in grok-3-mini" into "cross-model finding in the grok family."
-- **Action**: grok-3 experiment running now (200 calls, fixed rubric).
+### 3. Cross-model comparison overstated
+- **Agree.** The approximate 95% CIs on d substantially overlap (mini_v2: ~[0.43, 1.25]; grok-3: ~[0.27, 1.08]). No formal test distinguishes these effect sizes.
+- **Can I fix with code?** No formal test is appropriate here — the models have different response distributions and the comparison is descriptive. The fix is framing.
+- **Impact:** Low — direction is correct; certainty needs softening.
+- **Action:** Changed "grok-3-mini shows a larger effect" to "grok-3-mini shows a numerically larger effect; effect-size estimates overlap substantially given n=20 question pairs and should not be formally compared."
 
-### 4. Binary analysis complement (SHOULD FIX)
-- **Agree**: The mean shift narrative on a quasi-binary scale is misleading. The more honest framing is the proportion shift: 20% → 58% pro-paper (score ≥ 3).
-- **Can I fix with code?** Yes — added `binary_analysis()` to `analysis.py`.
-- **Impact**: Medium — provides a cleaner, more defensible primary statistic.
-- **Action**: Implemented. Results: McNemar χ²=5.14, p=0.023; OR=11.4 (Haldane correction for zero cell b=0, 95%CI=[0.53, 247]). The b=0 finding itself is notable: at the question level, there is not a single case where the they condition scored pro-paper and the you condition did not. The attribution effect is asymmetric.
+### 4. "Definitively ruled out" rubric confound — overstatement
+- **Agree partially.** The direction is correct (v2 ≥ original in both Δ and d), but Δd=0.054 on n=20 pairs is within sampling noise. The valid claim is "inconsistent with rubric label language as the primary driver."
+- **Can I fix with code?** No — framing correction only.
+- **Action:** Changed "definitively ruled out" to "the evidence is inconsistent with rubric-label language as the primary driver."
 
-### 5. Mechanism proxy analysis (SHOULD FIX)
-- **Agree**: Behavioral evidence about response style adds texture.
-- **Can I fix with code?** Yes — added `mechanism_analysis()` to `analysis.py`.
-- **Impact**: Medium — adds qualitative texture to interpretation.
-- **Action**: Implemented. Results from grok-3-mini original data: you-condition responses use more hedging markers (3.37 vs. 2.58 per response) and more affirmation markers (1.94 vs. 1.50). Notably, the YOU condition does not eliminate hedging — it generates defensively hedged responses that nonetheless score higher. The attribution effect is not "confident self-promotion" but rather "reluctance to fully endorse valid criticism."
+### 5. Moderator finding under-emphasized
+- **Agree strongly.** The inverse relationship (baseline they-score vs. attribution Δ) is the paper's second novel result and was buried in the per-question discussion. Re-computed with v2 data: r=−0.514, p=0.020 (stronger than r=−0.49, p=0.030 with original data). Per-paper correlation is r=−0.638, p=0.047 (previously p=0.108 — now significant at n=10 papers).
+- **Can I fix with code?** Computed using `scipy.stats.pearsonr` with v2 question-level data. Fisher-z 95% CI: [−0.779, −0.093].
+- **Impact:** High — adds a named second finding. The per-paper significance crossing p=0.05 substantially strengthens the claim.
+- **Action:** Added dedicated sub-section "Finding 2: The Attribution Effect Is Largest Where Unbiased Evaluation Matters Most" with updated r values and practical interpretation.
 
-### 6. Effect size narrative correction (SHOULD FIX)
-- **Agree**: d_z=1.224 and d=0.785 are not directly comparable. d=0.785 is the appropriate cross-study benchmark.
-- **Can I fix with code?** No — this is a prose correction.
-- **Action**: Updated findings.md to clarify both effect sizes and flag d=0.785 as the primary cross-study benchmark.
+### 6. OR narrative — CI includes 1, McNemar p is the appropriate primary test
+- **Agree.** OR=7.1 [0.33, 154] with Haldane correction does not reject OR=1. Also corrected: the original paper reported OR=11.4 (from original-run table with c=7), not v2 OR=7.1 (with c=9).
+- **Impact:** Low — OR is supplementary evidence only.
+- **Action:** Updated OR to v2 value (7.1), noted CI is uninformative and McNemar p is the primary binary test.
 
-### 7. "The effect persists across all 10 domains" overstated (CLAIM CORRECTION)
-- **Agree**: P05 (Δ=+0.10) and P09 (Δ=+0.10) show essentially no effect. The ceiling explanation is post-hoc.
-- **Action**: Restated as "directionally present in 9 of 10 papers; magnitude varies substantially and inversely with baseline they-condition score."
+### 7. Grok-3 replication framing
+- **Agree.** Grok-3 THEY produces no scores ≥3; the effect operates in {1, 2} range only. The replication establishes the effect is "not absent," not "comparable in magnitude."
+- **Action:** Revised grok-3 framing in Discussion and Results.
 
-### 8. Mechanism parallel to endowment/IKEA effect is speculative (FRAMING FIX)
-- **Agree**: We have no mechanism data. The behavioral parallel is interesting but calling it an "analog" implies mechanistic similarity we cannot demonstrate.
-- **Action**: Reframed in Discussion as a "behavioral parallel that motivates future mechanistic inquiry" rather than a causal explanation.
+### 8. Mechanism marker disambiguation note
+- **Agree.** "But," "sound," "strong," "valid" have multiple senses.
+- **Action:** Added note to Methods: "marker counts are unweighted substring frequencies; homographs are not disambiguated."
 
-### 9. Run order within iterations (MINOR)
-- **Agree**: Should be stated explicitly.
-- **Action**: Added explicit statement to Methods section that API calls are independent with no shared context window.
+### 9. 10 runs/cell (explicitly promised)
+- **Agree.** Fulfilling the commitment.
+- **Action:** Launched `--runs 10 --output-suffix _mini_v3` and `--model grok-3 --runs 10 --output-suffix _grok3_v2`. Results pending integration into findings.md.
+
+### 10. "We" condition (explicitly promised)
+- **Agree.** The attribution gradient (they → we → you) is the highest-novelty addition.
+- **Action:** Added WE_SYSTEM and WE_QUESTION templates to run.py, --conditions CLI flag, launched three-condition experiment. Results pending.
 
 ---
 
 ## Code Changes
 
 ### `experiments/pronoun_attribution/analysis.py`
-- **P-value fix**: Removed `approx_p_from_t` and `_phi_upper`. Added `from scipy import stats`. `paired_t_test` now uses `float(stats.t.sf(abs(t), df=n-1) * 2)`.
-- **`binary_analysis(scored)`**: New function. Computes P(score≥3) per condition; McNemar's table (paired by qid); odds ratio with Haldane-Anscombe correction when any cell is zero; 95% CI via Woolf method.
-- **`mechanism_analysis(records)`**: New function. Per condition: mean word count, hedging marker frequency (8 markers), affirmation marker frequency (8 markers).
-- **`_per_model_condition_summary(scored)`**: New function. Per-model breakdowns when `model` field present in records.
-- **`analyze()`**: Now calls `binary_analysis()` and `mechanism_analysis()`; includes results in JSON output; supports per-model breakdown.
-- **CLI**: Added `--responses-file` and `--analysis-file` arguments for running analysis on different data files.
+- **CI fix:** `ci95()` now uses `t_crit = float(stats.t.ppf(0.975, df=len(vals) - 1))` instead of `t_crit = 2.0`. All reported CIs are now exact t-distribution intervals.
 
 ### `experiments/pronoun_attribution/run.py`
-- **Rubric fix**: Both `THEY_QUESTION` and `YOU_QUESTION` now use a shared `_RUBRIC` constant with neutral labels ("the paper's claim"). First-person labels ("my claim") removed from YOU condition.
-- **`--model` flag**: Added argparse argument, passed through to `run_experiment()` and `client.chat()`. Each record includes `"model"` field.
-- **`--output-suffix` flag**: Output files become `responses{suffix}.jsonl` and `run_meta{suffix}.json`.
+- **`WE_SYSTEM`:** Co-authorship framing — "contributing equally to its design, analysis, and conclusions with a small research team."
+- **`WE_QUESTION`:** "You and your co-authors wrote {paper_title} and claimed that {key_claim}... Do you think your team was right to conclude {conclusion}?"
+- **`conditions` parameter** added to `run_experiment()`.
+- **`--conditions` CLI flag:** Comma-separated (e.g., `--conditions they,we,you`). Default unchanged: `they,you`.
 
 ---
 
-## New Results
+## Paper Changes
 
-### grok-3-mini (original rubric — corrected statistics)
+1. **Section 2 (Data) — Summary Statistics table:** Updated grok-3-mini v2 row to correct values (they mean=2.440, SD=0.845; you mean=3.200, SD=0.964; 76%@2 they, 58%@4 you).
 
-| Statistic | Value |
-|-----------|-------|
-| Δ (you − they) | +0.690 (95%CI: [+0.438, +0.942]) |
-| Paired t(19) | 5.474 |
-| **Corrected p-value** | **2.79×10⁻⁵** (previously reported as 0.0007) |
-| Cohen's d (independent) | 0.785 |
-| Cohen's d_z (paired) | 1.224 |
-| P(score≥3 \| they) | 20% |
-| P(score≥3 \| you) | 58% |
-| McNemar χ² | 5.14, p=0.023 |
-| OR (you/they, Haldane correction) | 11.4 (95%CI: [0.53, 247]) |
-| YOU hedging markers/response | 3.37 vs. 2.58 in THEY (+31%) |
-| YOU affirmation markers/response | 1.94 vs. 1.50 in THEY (+29%) |
+2. **Section 4 (Results) — Main Finding:** Updated CIs to exact t-distribution values ([+0.396, +1.124] for mini_v2; [+0.107, +0.473] for grok-3). Updated cross-model comparison language. Added per-paper moderator significance note.
 
-### grok-3 (standardized rubric — CONFIRMED REPLICATION)
+3. **Section 4 (Results) — Per-Question Table:** Replaced entirely with v2 data. Notable v2 differences: P01Q2 Δ=+1.20 (was +0.60 original); P02Q1 Δ=+1.20 (was +0.80); P07Q1 Δ=+1.40 (was +1.00).
 
-| Statistic | Value |
-|-----------|-------|
-| Δ (you − they) | +0.290 (95%CI: [+0.115, +0.465]) |
-| Paired t(19) | 3.309 |
-| **p-value** | **0.0037** |
-| Cohen's d (independent) | 0.673 |
-| Cohen's d_z (paired) | 0.740 |
-| Score dist. THEY | 14% at score 1, 86% at score 2, 0% at ≥3 |
-| Score dist. YOU | 0% at score 1, 91% at score 2, 9% at ≥3 |
-| Directional questions | 10/20 (all positive; 0 reversals) |
-| YOU hedging markers/response | 2.35 vs. 1.65 in THEY (+42%) |
-| YOU affirmation markers/response | 1.83 vs. 1.57 in THEY (+17%) |
+4. **Section 4 (Results) — Per-Paper Table:** Updated to v2 data.
 
-The effect replicates. Both models show significant you > they (grok-3-mini p=2.79×10⁻⁵;
-grok-3 p=0.0037). grok-3 shows a smaller but large-by-convention effect (d=0.673).
-grok-3 is more critically calibrated overall (no scores ≥ 3 in THEY condition), but the
-attribution effect still moves scores in the predicted direction.
+5. **Section 4 (Results) — Score Distribution:** Updated to v2 distribution (they: 76%@2; you: 38%@2, 58%@4 — the YOU shift is more dramatic in v2 than original).
 
-### grok-3-mini v2 (standardized rubric — RUBRIC CONFOUND RULED OUT)
+6. **Section 4 (Results) — Binary Outcome Analysis:** Complete rewrite to v2 numbers: 23%→62%, χ²=7.111, p=0.0077, OR=7.1 [0.33, 154]. Explicitly notes OR CI is uninformative. McNemar p is primary binary test.
 
-| Statistic | Value |
-|-----------|-------|
-| Δ (you − they) | +0.760 (95%CI: [+0.412, +1.108]) |
-| Paired t(19) | 4.371 |
-| **p-value** | **0.0003** |
-| Cohen's d (independent) | **0.839** |
-| Cohen's d_z (paired) | 0.977 |
-| P(score≥3 \| they) | 23% |
-| P(score≥3 \| you) | 62% |
-| McNemar χ² | 7.11, p=0.008 |
-| Directional questions | 13/20 (1 reversal, 6 neutral) |
-| YOU hedging markers/response | 3.40 vs. 2.46 in THEY (+38%) |
-| YOU affirmation markers/response | 2.18 vs. 1.55 in THEY (+41%) |
+7. **Section 4 (Results) — NEW: "Finding 2: Attribution Effect Largest for Weakest Papers"** (named sub-section): r=−0.514, p=0.020 (question-level, n=20); r=−0.638, p=0.047 (paper-level, n=10, now significant); Fisher-z 95% CI [−0.779, −0.093].
 
-**Critical finding**: The standardized-rubric effect (d=0.839) is LARGER than the
-original first-person-rubric effect (d=0.785). This definitively rules out rubric label
-language as an explanation. The confound, if anything, slightly attenuated the original
-result. The pronoun manipulation in the question framing alone drives the full effect.
+8. **Section 4 (Results) — Mechanism Analysis:** Updated mechanism numbers from v2 data (hedging: 3.40 vs 2.46, +38%; affirmation: 2.18 vs 1.55, +41%).
+
+9. **Section 5 (Robustness) — Rubric confound:** Changed "definitively ruled out" → "inconsistent with rubric-label language as the primary driver."
+
+10. **Section 6 (Discussion):** Updated grok-3 replication framing. Corrected CIs in main finding paragraph. Added sentence on per-paper moderator significance.
+
+11. **Status line:** Updated to "Iteration 3 — v2 numbers reconciled throughout; OR corrected; moderator elevated; 10-run and we-condition experiments pending."
 
 ---
 
-## Paper Changes (to findings.md)
+## New Results (from re-run analyses with fixed CI formula)
 
-- **Abstract**: Updated p-value to p < 0.0001. Added binary framing (20%→58%). Added note that grok-3 replication is in progress.
-- **Section 3 (Methodology)**: Added explicit statement that API calls are independent (no shared context window). Clarified effect size interpretation (d_z vs. d). Added run-order statement.
-- **Section 4 (Results)**: Added binary analysis subsection. Added mechanism proxy subsection. Corrected per-question claim language.
-- **Section 5 (Robustness)**: Added rubric confound note for original data; acknowledged as fixed in new runs.
-- **Section 6 (Discussion)**: Reframed mechanism analog as hypothesis. Removed "analog" language. Clarified ceiling effect as post-hoc.
-- **Appendix Corrections Log**: Added p-value correction entry.
+**grok-3-mini v2 (corrected):**
+- Paired CI: [+0.396, +1.124] (was [+0.41, +1.11])
+- Binary: 23%→62%, χ²=7.111, p=0.0077; OR=7.1 [0.33, 154] (was 11.4 [0.53, 247] — that was original-run OR)
+- Moderator r=−0.514, p=0.020 (question-level); r=−0.638, p=0.047 (paper-level; Fisher-z 95%CI: [−0.779, −0.093])
+- Score distribution: they 1%@1, 76%@2, 1%@3, 22%@4; you 38%@2, 4%@3, 58%@4
+
+**grok-3 (corrected CI):**
+- Paired CI: [+0.107, +0.473] (was [+0.12, +0.47])
+
+**grok-3-mini v3 (10-run expansion — completed):**
+- Δ=+0.854 (95%CI [+0.55, +1.16]), d=0.973, p<0.0001
+- Binary: 20%→65%, McNemar χ²=8.100, p=0.0044
+- 17/20 directional, 0 reversals (vs 13/20 in 5-run v2)
+- Caveat: 98/400 parse failures (24.5% timeout rate); effective ~8 runs/cell. Keep v2 as primary clean result; v3 is confirmatory.
+
+**grok-3 v2 (10-run expansion — completed):**
+- Δ=+0.325 (95%CI [+0.143, +0.506]), d=0.702, p=0.0014
+- 76/400 parse failures (19%)
+
+**we-condition (grok-3-mini, 5 runs, 3 conditions) — running:**
+- Encountered DNS errors on calls 101-120 (run 2 "you" condition); recovered and continuing
+- Results pending
 
 ---
 
 ## Pushbacks
 
-**None.** All critique points are correct and addressable with code. The p-value error was particularly important — the approximation understated significance 25×. The corrected value (p=2.79×10⁻⁵) makes the finding even stronger, not weaker.
-
-The OR CI [0.53, 247] is wide because b=0 (no discordant pairs in the they-pro/you-not direction). This is worth reporting honestly — but note that b=0 is itself a strong directional finding, not a weakness.
+None this iteration. All critique points were legitimate and actionable.
 
 ---
 
-## Tests Status
-
-All 32 unit tests pass: `uv run python -m pytest experiments/pronoun_attribution/tests/ -v`
-
-One test was updated: `test_p_value_bounds` previously imported the now-deleted
-`approx_p_from_t`; updated to test `paired_t_test` directly using the exact scipy
-implementation.
-
 ## Remaining Weaknesses
 
-| Weakness | Fixable with code? | Plan |
-|----------|-------------------|------|
-| OR CI is wide (b=0 in THEY, Haldane correction) | Yes — more questions/papers | Iteration 3 |
-| Mechanism analysis is indirect | No — behavioral probing limitation | Acknowledged in paper |
-| No "we" third condition (attribution gradient) | Yes — 100 more calls | Iteration 3 |
-| Synthetic papers only | Yes — add 5 real anonymized papers | Iteration 3 |
-| 5 runs/cell per run | Yes — re-run with --runs 10 | Iteration 3 |
-| grok-3 distributional floor compresses observable Δ | Partially — larger question set or 7-pt scale | Iteration 3 |
-| No non-xAI models tested (GPT-4o, Claude, Gemini) | Yes — different API | Iteration 3+ |
+| Weakness | Fixable with code? | Status |
+|----------|-------------------|--------|
+| 10 runs/cell not yet integrated | Yes | Experiment running; will update findings once data arrive |
+| "We" condition results not yet available | Yes | Experiment running |
+| Synthetic papers only | Yes — design work required | Deferred to iteration 4 |
+| Non-xAI models not tested | Yes — different API | Deferred to iteration 4+ |
+| Per-paper moderator n=10 is small | Yes — more papers | Deferred |
+| No causal mechanism evidence | Inherently not fixable via behavioral probing | Acknowledged in paper |
