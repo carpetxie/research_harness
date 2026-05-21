@@ -1,1 +1,1 @@
-<!-- Describe your preferred tone, format, audience, and what to emphasize in summaries. This file is read by the summarizer agent when writing docs/summaries/summary_N.md. -->
+I rather you overexplain than underexplain. Be thorough in your explanations to me. 
