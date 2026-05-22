@@ -18,6 +18,8 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -46,6 +48,17 @@ CONFIG_FILE   = BASE / "config.env"
 def c(color: str, text: str) -> str:
     """Wrap text in an ANSI color code."""
     return f"{color}{text}{NC}"
+
+
+def ts() -> str:
+    """Short HH:MM:SS timestamp for log lines."""
+    return datetime.now().strftime("%H:%M:%S")
+
+
+def log(msg: str, color: str = DIM) -> None:
+    """Print a timestamped status line and flush immediately."""
+    sys.stdout.write(c(color, f"  [{ts()}] {msg}\n"))
+    sys.stdout.flush()
 
 
 def print_banner(title: str, subtitle: str = "") -> None:
@@ -246,6 +259,15 @@ def run_agent(
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
+    prompt_chars = len(prompt)
+    sys_chars = len(system_prompt)
+    log(
+        f"agent setup: model={model} tools=[{allowed_tools}] "
+        f"max_turns={max_turns} prompt={prompt_chars:,} chars "
+        f"system={sys_chars:,} chars  →  log: {log_path.relative_to(BASE)}",
+        CYAN,
+    )
+
     # Pass prompt via stdin (no positional arg) to avoid OS argument length limits.
     # claude -p with no positional prompt reads from stdin.
     cmd = [
@@ -256,6 +278,9 @@ def run_agent(
         "--max-turns", str(max_turns),
         "--no-session-persistence",
     ]
+
+    log(f"spawning: {' '.join(cmd[:4])} ...", DIM)
+    spawn_t = time.time()
 
     try:
         proc = subprocess.Popen(
@@ -271,18 +296,48 @@ def run_agent(
         print(c(RED, "  ERROR: 'claude' CLI not found. Is Claude Code installed?"))
         return 1
 
+    log(f"subprocess pid={proc.pid} started in {time.time()-spawn_t:.2f}s; writing prompt to stdin...", DIM)
+
     assert proc.stdin is not None
     proc.stdin.write(prompt)
     proc.stdin.close()
 
+    # Heartbeat: print a status line every 10s while waiting for first output,
+    # so the user can see the harness isn't hung.
+    first_output_seen = threading.Event()
+    done = threading.Event()
+    wait_start = time.time()
+
+    def heartbeat() -> None:
+        while not done.is_set():
+            if done.wait(10):
+                return
+            if not first_output_seen.is_set():
+                log(f"still waiting for first output... ({time.time()-wait_start:.0f}s)", YELLOW)
+
+    hb = threading.Thread(target=heartbeat, daemon=True)
+    hb.start()
+
+    line_count = 0
     with open(log_path, "w", encoding="utf-8") as log_f:
         assert proc.stdout is not None
         for line in proc.stdout:
+            if not first_output_seen.is_set():
+                first_output_seen.set()
+                log(f"first output received after {time.time()-wait_start:.1f}s; streaming...", GREEN)
+            line_count += 1
             sys.stdout.write(c(DIM, line))
             sys.stdout.flush()
             log_f.write(line)
 
     proc.wait()
+    done.set()
+    elapsed = time.time() - wait_start
+    log(
+        f"agent finished: exit={proc.returncode} elapsed={elapsed:.1f}s "
+        f"output_lines={line_count}",
+        GREEN if proc.returncode == 0 else RED,
+    )
     return proc.returncode
 
 
@@ -774,7 +829,10 @@ def cmd_init() -> None:
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
 def cmd_run(max_iterations: int | None, model: str | None, resume: bool) -> None:
+    log(f"harness starting (cwd: {BASE})", BOLD)
+    log(f"reading config: {CONFIG_FILE.relative_to(BASE)} (exists={CONFIG_FILE.exists()})")
     cfg = parse_config(CONFIG_FILE)
+    log(f"config loaded: {len(cfg)} keys → {sorted(cfg.keys())}")
 
     topic   = cfg.get("TOPIC", "your research topic")
     venue   = cfg.get("PUBLICATION_VENUE", "your research blog or journal")
@@ -785,9 +843,24 @@ def cmd_run(max_iterations: int | None, model: str | None, resume: bool) -> None
     # Resolve model and max_iterations
     effective_model = model or default_model
     effective_iters = max_iterations or default_iters
+    log(
+        f"effective settings: model={effective_model} "
+        f"(cli={model!r} default={default_model!r}) "
+        f"iters={effective_iters} (cli={max_iterations!r} default={default_iters})"
+    )
 
     # Load or create session
+    log(f"loading session: {SESSION_FILE.relative_to(BASE)} (exists={SESSION_FILE.exists()})")
     session = load_session()
+    if session:
+        log(
+            f"session found: run_idx={session.get('run_idx')} "
+            f"iter={session.get('current_iteration')}/{session.get('max_iterations')} "
+            f"model={session.get('model')} "
+            f"started_at={session.get('started_at', '?')[:19]}"
+        )
+    else:
+        log("no prior session — starting fresh")
 
     if resume or (session and session.get("current_iteration", 0) < session.get("max_iterations", 0)):
         # Resume existing session
@@ -833,10 +906,16 @@ def cmd_run(max_iterations: int | None, model: str | None, resume: bool) -> None
         print(c(BOLD + BLUE, f"  ── Iteration {i} / {max_iters} ──"))
         print()
 
+        iter_start_t = time.time()
+        log("reading prompt files...")
         brief_text    = read_file(DOCS / "research_brief.md")
         critiquer_pm  = read_file(DOCS / "critique_prompt.md")
         researcher_pm = read_file(DOCS / "researcher_prompt.md")
         tools_ctx     = build_tools_context()
+        log(
+            f"loaded: brief={len(brief_text):,}ch  critiquer_pm={len(critiquer_pm):,}ch  "
+            f"researcher_pm={len(researcher_pm):,}ch  tools_ctx={len(tools_ctx):,}ch"
+        )
 
         # ── Phase 1: Critiquer ────────────────────────────────────────────────
         print(c(YELLOW, f"  [Phase 1] Critiquer..."))
@@ -887,6 +966,7 @@ def cmd_run(max_iterations: int | None, model: str | None, resume: bool) -> None
         # ── Phase 2: Researcher ───────────────────────────────────────────────
         print()
         print(c(GREEN, f"  [Phase 2] Researcher..."))
+        log(f"phase 1 (critiquer) total elapsed: {time.time()-iter_start_t:.1f}s")
 
         critique_text = read_file(EXCHANGES / "critique_latest.md")
 
